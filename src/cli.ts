@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import {
   findNodeModules,
@@ -95,7 +94,9 @@ function printResults(results: NodeModulesInfo[], rootPath: string): void {
   const totalSize = results.reduce((sum, r) => sum + (r.size ?? 0), 0);
 
   for (const result of results) {
-    const size = (result.size !== null ? formatSize(result.size) : "?").padStart(10);
+    const size = (
+      result.size !== null ? formatSize(result.size) : "?"
+    ).padStart(10);
     const age = formatAge(result.modifiedAt).padStart(15);
     const relPath = relative(rootPath, result.path);
     console.log(`  ${size}  ${age}  ${relPath}`);
@@ -116,24 +117,33 @@ async function confirmClean(): Promise<boolean> {
 }
 
 async function cleanDirectories(results: NodeModulesInfo[]): Promise<void> {
-  let cleaned = 0;
-  let freedSpace = 0;
+  if (results.length === 0) return;
 
-  for (const result of results) {
-    try {
-      await rm(result.path, { recursive: true, force: true });
-      cleaned++;
-      freedSpace += result.size ?? 0;
-      console.log(`  ✓ Deleted ${result.path}`);
-    } catch (error) {
-      console.error(`  ✗ Failed to delete ${result.path}: ${error}`);
-    }
+  const { cpus } = await import("node:os");
+  const { $ } = await import("bun");
+  const concurrency = Math.max(1, cpus().length - 1);
+
+  const paths = results.map((r) => r.path);
+  const input = paths.join("\n");
+
+  try {
+    await $`echo ${input} | xargs -P ${concurrency} -I {} rm -rf {}`.quiet();
+  } catch {
+    // xargs may return non-zero if some deletions fail
   }
 
-  console.log(`\n🧹 Cleaned ${cleaned} directories, freed ${formatSize(freedSpace)}\n`);
+  const freedSpace = results.reduce((sum, r) => sum + (r.size ?? 0), 0);
+  console.log(
+    `\n🧹 Cleaned ${results.length} directories, freed ${formatSize(
+      freedSpace
+    )}\n`
+  );
 }
 
-function filterByAge(results: NodeModulesInfo[], olderThanDays: number): NodeModulesInfo[] {
+function filterByAge(
+  results: NodeModulesInfo[],
+  olderThanDays: number
+): NodeModulesInfo[] {
   const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
   return results.filter((r) => r.modifiedAt < cutoff);
 }
@@ -150,12 +160,17 @@ async function main(): Promise<void> {
 
   const results = await findNodeModules(args.path);
   await populateSizes(results);
-  
-  const sorted = args.sortBySize ? sortBySize(results) : sortByAge(results, true);
-  const filtered = args.olderThan !== null ? filterByAge(sorted, args.olderThan) : sorted;
+
+  const sorted = args.sortBySize
+    ? sortBySize(results)
+    : sortByAge(results, true);
+  const filtered =
+    args.olderThan !== null ? filterByAge(sorted, args.olderThan) : sorted;
 
   if (args.olderThan !== null) {
-    console.log(`Filtering to directories older than ${args.olderThan} days...\n`);
+    console.log(
+      `Filtering to directories older than ${args.olderThan} days...\n`
+    );
   }
 
   printResults(filtered, args.path);

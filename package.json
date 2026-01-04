@@ -7,7 +7,7 @@
     "nmc": "./dist/cli.js"
   },
   "scripts": {
-    "build": "bun build ./src/cli.ts --outdir ./dist --target node",
+    "build": "bun build ./src/cli.ts --outdir ./dist --target bun",
     "dev": "bun run ./src/cli.ts",
     "test": "bun test"
   },
